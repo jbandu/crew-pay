@@ -1,0 +1,21 @@
+{
+  "id": "claim-2024-001",
+  "crew_member": {
+    "id": "crew-002",
+    "name": "Jane Smith",
+    "employee_id": "EMP-67890",
+    "department": "Operations",
+    "position": "Operations Manager",
+    "hourly_rate": "85.00",
+    "email": "jane.smith@example.com",
+    "phone": "+1-555-0200"
+  },
+  "claim_type": "overtime",
+  "amount": "500.00",
+  "description": "Overtime work on emergency deployment over the weekend. Worked additional 10 hours on Saturday and Sunday to resolve critical production issues.",
+  "supporting_documents": [
+    "timesheet_weekend.pdf",
+    "deployment_log.txt"
+  ],
+  "status": "submitted"
+}

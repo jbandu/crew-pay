@@ -1,0 +1,22 @@
+{
+  "id": "pay-2024-001",
+  "crew_member": {
+    "id": "crew-001",
+    "name": "John Doe",
+    "employee_id": "EMP-12345",
+    "department": "Engineering",
+    "position": "Senior Engineer",
+    "hourly_rate": "75.50",
+    "email": "john.doe@example.com",
+    "phone": "+1-555-0100"
+  },
+  "pay_period_start": "2024-01-01",
+  "pay_period_end": "2024-01-15",
+  "pay_period_type": "bi_weekly",
+  "regular_hours": "80.0",
+  "overtime_hours": "5.0",
+  "gross_pay": "6415.00",
+  "deductions": "1283.00",
+  "net_pay": "5132.00",
+  "status": "pending"
+}
