@@ -1,0 +1,570 @@
+// Avelo Airlines Crew Pay Management System
+// Entity Relationship Diagram (ERD)
+// Generated for: dbdiagram.io
+// Version: 1.0.0
+// Date: 2024-11-20
+
+Project crew_copilot_production {
+  database_type: 'PostgreSQL'
+  Note: '''
+    # Avelo Airlines Crew Pay Management System
+
+    Production database architecture for intelligent crew pay management
+    with proactive discrepancy detection and automated claims processing.
+
+    Features:
+    - 14 core tables
+    - Full audit trail
+    - Row-level security
+    - Hybrid architecture (Postgres + Neo4j)
+  '''
+}
+
+// ============================================================================
+// CREW MANAGEMENT
+// ============================================================================
+
+Table crew_members {
+  id uuid [pk, default: `gen_random_uuid()`]
+  employee_id varchar(20) [unique, not null, note: 'Unique employee number']
+  first_name varchar(100) [not null]
+  last_name varchar(100) [not null]
+  position crew_position [not null, note: 'CAPTAIN | FIRST_OFFICER | FLIGHT_ATTENDANT']
+  base_location varchar(10) [not null, note: 'BUR, IFP, HVN, etc.']
+  hire_date date [not null]
+  seniority_number integer [not null, note: 'Seniority ranking']
+  base_hourly_rate decimal(10,2) [not null]
+  union_status union_status [not null]
+  contract_type contract_type [not null]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    employee_id [unique]
+    seniority_number
+    base_location
+    position
+  }
+
+  Note: 'Core crew member profiles and employment information'
+}
+
+// ============================================================================
+// FLIGHT OPERATIONS
+// ============================================================================
+
+Table flights {
+  id uuid [pk, default: `gen_random_uuid()`]
+  flight_number varchar(10) [not null, note: 'e.g., XP101']
+  origin_airport varchar(4) [not null, note: 'ICAO code']
+  destination_airport varchar(4) [not null, note: 'ICAO code']
+  scheduled_departure timestamptz [not null]
+  scheduled_arrival timestamptz [not null]
+  actual_departure timestamptz [null]
+  actual_arrival timestamptz [null]
+  block_time_hours decimal(5,2) [null, note: 'Actual flight duration']
+  delay_minutes integer [null]
+  delay_code varchar(10) [null, note: 'WX, MX, ATC, etc.']
+  delay_reason text [null]
+  aircraft_type varchar(20) [not null, note: '737-800, etc.']
+  aircraft_registration varchar(20) [not null, note: 'Tail number']
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    flight_number
+    scheduled_departure
+    actual_departure
+    (origin_airport, destination_airport) [name: 'idx_flight_route']
+  }
+
+  Note: 'All flight operations with actual times and delays'
+}
+
+Table crew_assignments {
+  id uuid [pk, default: `gen_random_uuid()`]
+  crew_member_id uuid [not null, ref: > crew_members.id]
+  flight_id uuid [not null, ref: > flights.id]
+  position assignment_position [not null, note: 'OPERATING | DEADHEAD | RESERVE']
+  duty_start_time timestamptz [not null]
+  duty_end_time timestamptz [not null]
+  check_in_time timestamptz [null]
+  check_out_time timestamptz [null]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    crew_member_id
+    flight_id
+    duty_start_time
+  }
+
+  Note: 'Links crew members to flights with duty times'
+}
+
+// ============================================================================
+// PAY PROCESSING
+// ============================================================================
+
+Table pay_periods {
+  id uuid [pk, default: `gen_random_uuid()`]
+  start_date date [not null]
+  end_date date [not null]
+  pay_date date [not null]
+  status pay_period_status [not null, note: 'OPEN | CLOSED | PAID']
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    (start_date, end_date) [name: 'idx_pay_period_range']
+    status
+  }
+
+  Note: 'Payroll cycles (bi-weekly or monthly)'
+}
+
+Table pay_calculations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  crew_member_id uuid [not null, ref: > crew_members.id]
+  pay_period_id uuid [not null, ref: > pay_periods.id]
+  flight_pay_hours decimal(8,2) [not null, note: 'Credit hours']
+  flight_pay_amount decimal(10,2) [not null]
+  overtime_hours decimal(8,2) [default: 0]
+  overtime_amount decimal(10,2) [default: 0]
+  delay_pay_amount decimal(10,2) [default: 0]
+  per_diem_amount decimal(10,2) [default: 0]
+  premium_pay_amount decimal(10,2) [default: 0, note: 'Red-eye, holiday, intl']
+  guarantee_hours decimal(8,2) [not null, note: 'Monthly minimum']
+  total_gross_pay decimal(10,2) [not null]
+  calculation_date timestamptz [not null]
+  validated_at timestamptz [null]
+  validated_by varchar(100) [null]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    crew_member_id
+    pay_period_id
+    calculation_date
+  }
+
+  Note: 'Computed pay for each crew member per pay period'
+}
+
+// ============================================================================
+// DISCREPANCY & CLAIMS MANAGEMENT
+// ============================================================================
+
+Table discrepancies {
+  id uuid [pk, default: `gen_random_uuid()`]
+  crew_member_id uuid [not null, ref: > crew_members.id]
+  pay_period_id uuid [not null, ref: > pay_periods.id]
+  flight_id uuid [null, ref: > flights.id]
+  discrepancy_type discrepancy_type [not null]
+  expected_amount decimal(10,2) [not null]
+  actual_amount decimal(10,2) [not null]
+  difference_amount decimal(10,2) [not null]
+  severity severity [not null, note: 'CRITICAL | HIGH | MEDIUM | LOW']
+  detected_by detected_by [not null, note: 'PROACTIVE_AGENT | CREW_CLAIM']
+  detected_at timestamptz [not null]
+  resolution_status resolution_status [not null]
+  resolution_date timestamptz [null]
+  resolved_by varchar(100) [null]
+  resolution_notes text [null]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    crew_member_id
+    pay_period_id
+    resolution_status
+    detected_at
+    severity
+  }
+
+  Note: 'Proactively detected pay discrepancies'
+}
+
+Table claims {
+  id uuid [pk, default: `gen_random_uuid()`]
+  claim_number varchar(20) [unique, not null, note: 'CLM-2024-0001']
+  crew_member_id uuid [not null, ref: > crew_members.id]
+  pay_period_id uuid [not null, ref: > pay_periods.id]
+  flight_ids text[] [not null, note: 'Array of flight UUIDs']
+  claim_type claim_type [not null]
+  description text [not null, note: 'Free text from crew']
+  claimed_amount decimal(10,2) [not null]
+  submitted_at timestamptz [not null]
+  submitted_by varchar(100) [not null]
+  status claim_status [not null]
+  reviewed_at timestamptz [null]
+  reviewed_by varchar(100) [null, note: 'Human or AI agent']
+  decision claim_decision [null]
+  decision_rationale text [null, note: 'Detailed explanation']
+  approved_amount decimal(10,2) [null]
+  payment_date date [null]
+  payment_status payment_status [null]
+  appeal_submitted_at timestamptz [null]
+  appeal_notes text [null]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    crew_member_id
+    claim_number [unique]
+    status
+    submitted_at
+  }
+
+  Note: 'Crew-submitted pay claims with AI review'
+}
+
+// ============================================================================
+// REGULATORY & CONTRACT RULES
+// ============================================================================
+
+Table faa_rules {
+  id uuid [pk, default: `gen_random_uuid()`]
+  rule_code varchar(50) [unique, not null, note: 'Part117.23']
+  rule_category rule_category [not null]
+  rule_title varchar(255) [not null]
+  rule_text text [not null, note: 'Full regulation text']
+  effective_date date [not null]
+  expiration_date date [null]
+  applies_to applies_to[] [not null, note: 'PILOTS | FLIGHT_ATTENDANTS']
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    rule_code [unique]
+    rule_category
+  }
+
+  Note: 'FAA Part 117, Part 121 regulations'
+}
+
+Table union_contract_terms {
+  id uuid [pk, default: `gen_random_uuid()`]
+  term_code varchar(50) [unique, not null, note: 'ALPA_Section_5.A']
+  term_category term_category [not null]
+  term_title varchar(255) [not null]
+  term_text text [not null, note: 'Full contract language']
+  calculation_formula jsonb [null, note: 'JSON formula structure']
+  effective_date date [not null]
+  expiration_date date [null]
+  applies_to crew_position[] [not null]
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    term_code [unique]
+    term_category
+  }
+
+  Note: 'Union contract terms (ALPA, AFA)'
+}
+
+Table rule_interpretations {
+  id uuid [pk, default: `gen_random_uuid()`]
+  scenario_description text [not null]
+  applicable_faa_rule_ids uuid[] [not null]
+  applicable_contract_term_ids uuid[] [not null]
+  interpretation text [not null, note: 'How rules apply']
+  example_calculation jsonb [null, note: 'Sample calculation']
+  confidence_score integer [not null, note: '0-100']
+  validated_by varchar(100) [null, note: 'Legal, union, management']
+  created_at timestamptz [default: `now()`]
+  updated_at timestamptz [default: `now()`]
+
+  Indexes {
+    confidence_score
+  }
+
+  Note: 'Complex scenario interpretations'
+}
+
+// ============================================================================
+// NOTIFICATIONS & AUDIT
+// ============================================================================
+
+Table notifications {
+  id uuid [pk, default: `gen_random_uuid()`]
+  crew_member_id uuid [not null, ref: > crew_members.id]
+  notification_type notification_type [not null]
+  title varchar(255) [not null]
+  message text [not null]
+  related_entity_type varchar(50) [null, note: 'discrepancy, claim, etc.']
+  related_entity_id uuid [null]
+  sent_at timestamptz [not null]
+  read_at timestamptz [null]
+  delivery_method delivery_method [not null]
+  created_at timestamptz [default: `now()`]
+
+  Indexes {
+    crew_member_id
+    sent_at
+    read_at
+  }
+
+  Note: 'All crew notifications (email, SMS, push)'
+}
+
+Table audit_log {
+  id uuid [pk, default: `gen_random_uuid()`]
+  entity_type varchar(50) [not null, note: 'crew_member, claim, etc.']
+  entity_id uuid [not null]
+  action audit_action [not null]
+  actor_id varchar(100) [not null]
+  actor_type actor_type [not null, note: 'CREW | ADMIN | AI_AGENT']
+  changes jsonb [null, note: 'Before/after values']
+  reason text [null]
+  ip_address varchar(45) [null]
+  user_agent text [null]
+  created_at timestamptz [default: `now()`]
+
+  Indexes {
+    (entity_type, entity_id) [name: 'idx_audit_entity']
+    actor_id
+    created_at
+  }
+
+  Note: 'Full audit trail (append-only)'
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+Enum crew_position {
+  CAPTAIN
+  FIRST_OFFICER
+  FLIGHT_ATTENDANT
+  CHECK_AIRMAN
+  LINE_CHECK_AIRMAN
+}
+
+Enum union_status {
+  UNION_MEMBER
+  NON_UNION
+  PROBATIONARY
+}
+
+Enum contract_type {
+  FULL_TIME
+  PART_TIME
+  CONTRACTOR
+}
+
+Enum assignment_position {
+  OPERATING
+  DEADHEAD
+  RESERVE
+  STANDBY
+}
+
+Enum pay_period_status {
+  OPEN
+  CLOSED
+  PAID
+  PROCESSING
+}
+
+Enum discrepancy_type {
+  UNDERPAYMENT
+  OVERPAYMENT
+  MISSING_FLIGHT
+  INCORRECT_RATE
+  MISSING_PREMIUM
+  INCORRECT_PER_DIEM
+  GUARANTEE_NOT_MET
+  OVERTIME_MISCALCULATION
+  DELAY_PAY_MISSING
+}
+
+Enum severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+Enum detected_by {
+  PROACTIVE_AGENT
+  CREW_CLAIM
+  SYSTEM_CHECK
+  MANUAL_AUDIT
+}
+
+Enum resolution_status {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+  ESCALATED
+}
+
+Enum claim_type {
+  UNDERPAYMENT
+  MISSING_FLIGHT
+  INCORRECT_PER_DIEM
+  MISSING_PREMIUM
+  DELAY_PAY
+  OVERTIME
+  GUARANTEE
+  OTHER
+}
+
+Enum claim_status {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  DENIED
+  APPEALED
+  CLOSED
+}
+
+Enum claim_decision {
+  APPROVE
+  DENY
+  PARTIAL_APPROVE
+}
+
+Enum payment_status {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+}
+
+Enum rule_category {
+  FLIGHT_DUTY_PERIOD
+  REST_REQUIREMENTS
+  CUMULATIVE_LIMITS
+  FATIGUE_MANAGEMENT
+  CREW_COMPLEMENT
+  OTHER
+}
+
+Enum applies_to {
+  PILOTS
+  FLIGHT_ATTENDANTS
+  ALL_CREW
+}
+
+Enum term_category {
+  PAY_RATES
+  GUARANTEES
+  PREMIUMS
+  RIGS
+  PER_DIEM
+  OVERTIME
+  SCHEDULING
+  OTHER
+}
+
+Enum notification_type {
+  PROACTIVE_FIX
+  CLAIM_STATUS
+  COMPLIANCE_WARNING
+  PAY_CALCULATION_READY
+  DISCREPANCY_DETECTED
+  PAYMENT_PROCESSED
+}
+
+Enum delivery_method {
+  EMAIL
+  SMS
+  APP_PUSH
+  IN_APP
+}
+
+Enum audit_action {
+  CREATED
+  UPDATED
+  DELETED
+  APPROVED
+  DENIED
+  VIEWED
+}
+
+Enum actor_type {
+  CREW
+  ADMIN
+  AI_AGENT
+  SYSTEM
+}
+
+// ============================================================================
+// RELATIONSHIP DOCUMENTATION
+// ============================================================================
+
+// One crew member has many assignments
+Ref: crew_assignments.crew_member_id > crew_members.id [delete: cascade]
+
+// One flight has many crew assignments
+Ref: crew_assignments.flight_id > flights.id [delete: cascade]
+
+// One crew member has many pay calculations
+Ref: pay_calculations.crew_member_id > crew_members.id [delete: cascade]
+
+// One pay period has many pay calculations
+Ref: pay_calculations.pay_period_id > pay_periods.id [delete: cascade]
+
+// One crew member has many discrepancies
+Ref: discrepancies.crew_member_id > crew_members.id [delete: cascade]
+
+// One pay period has many discrepancies
+Ref: discrepancies.pay_period_id > pay_periods.id [delete: cascade]
+
+// One flight may have many discrepancies
+Ref: discrepancies.flight_id > flights.id [delete: set null]
+
+// One crew member has many claims
+Ref: claims.crew_member_id > crew_members.id [delete: cascade]
+
+// One pay period has many claims
+Ref: claims.pay_period_id > pay_periods.id [delete: cascade]
+
+// One crew member has many notifications
+Ref: notifications.crew_member_id > crew_members.id [delete: cascade]
+
+// ============================================================================
+// TABLE GROUPS (for visualization)
+// ============================================================================
+
+TableGroup crew_operations {
+  crew_members
+  crew_assignments
+  flights
+
+  Note: 'Core crew and flight operations'
+}
+
+TableGroup pay_processing {
+  pay_periods
+  pay_calculations
+
+  Note: 'Pay calculation and processing'
+}
+
+TableGroup quality_assurance {
+  discrepancies
+  claims
+
+  Note: 'Discrepancy detection and claims'
+}
+
+TableGroup compliance {
+  faa_rules
+  union_contract_terms
+  rule_interpretations
+
+  Note: 'Regulatory and contract compliance'
+}
+
+TableGroup system {
+  notifications
+  audit_log
+
+  Note: 'System notifications and audit trail'
+}

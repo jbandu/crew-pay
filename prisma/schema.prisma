@@ -1,0 +1,555 @@
+// Avelo Airlines Crew Pay Management System
+// Production Database Schema
+// Database: Neon Postgres with pgBouncer connection pooling
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  extensions = [pgcrypto]
+}
+
+// ============================================================================
+// CREW MANAGEMENT
+// ============================================================================
+
+model CrewMember {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId        String   @unique @map("employee_id") @db.VarChar(20)
+  firstName         String   @map("first_name") @db.VarChar(100)
+  lastName          String   @map("last_name") @db.VarChar(100)
+  position          CrewPosition
+  baseLocation      String   @map("base_location") @db.VarChar(10)
+  hireDate          DateTime @map("hire_date") @db.Date
+  seniorityNumber   Int      @map("seniority_number")
+  baseHourlyRate    Decimal  @map("base_hourly_rate") @db.Decimal(10, 2)
+  unionStatus       UnionStatus @map("union_status")
+  contractType      ContractType @map("contract_type")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  crewAssignments   CrewAssignment[]
+  payCalculations   PayCalculation[]
+  discrepancies     Discrepancy[]
+  claims            Claim[]
+  notifications     Notification[]
+
+  @@index([employeeId])
+  @@index([seniorityNumber])
+  @@index([baseLocation])
+  @@index([position])
+  @@map("crew_members")
+}
+
+enum CrewPosition {
+  CAPTAIN
+  FIRST_OFFICER
+  FLIGHT_ATTENDANT
+  CHECK_AIRMAN
+  LINE_CHECK_AIRMAN
+
+  @@map("crew_position")
+}
+
+enum UnionStatus {
+  UNION_MEMBER
+  NON_UNION
+  PROBATIONARY
+
+  @@map("union_status")
+}
+
+enum ContractType {
+  FULL_TIME
+  PART_TIME
+  CONTRACTOR
+
+  @@map("contract_type")
+}
+
+// ============================================================================
+// FLIGHT OPERATIONS
+// ============================================================================
+
+model Flight {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  flightNumber          String   @map("flight_number") @db.VarChar(10)
+  originAirport         String   @map("origin_airport") @db.VarChar(4)
+  destinationAirport    String   @map("destination_airport") @db.VarChar(4)
+  scheduledDeparture    DateTime @map("scheduled_departure") @db.Timestamptz
+  scheduledArrival      DateTime @map("scheduled_arrival") @db.Timestamptz
+  actualDeparture       DateTime? @map("actual_departure") @db.Timestamptz
+  actualArrival         DateTime? @map("actual_arrival") @db.Timestamptz
+  blockTimeHours        Decimal? @map("block_time_hours") @db.Decimal(5, 2)
+  delayMinutes          Int?     @map("delay_minutes")
+  delayCode             String?  @map("delay_code") @db.VarChar(10)
+  delayReason           String?  @map("delay_reason") @db.Text
+  aircraftType          String   @map("aircraft_type") @db.VarChar(20)
+  aircraftRegistration  String   @map("aircraft_registration") @db.VarChar(20)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  crewAssignments       CrewAssignment[]
+  discrepancies         Discrepancy[]
+
+  @@index([flightNumber])
+  @@index([scheduledDeparture])
+  @@index([actualDeparture])
+  @@index([originAirport, destinationAirport])
+  @@map("flights")
+}
+
+// ============================================================================
+// CREW ASSIGNMENTS
+// ============================================================================
+
+model CrewAssignment {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  crewMemberId    String   @map("crew_member_id") @db.Uuid
+  flightId        String   @map("flight_id") @db.Uuid
+  position        AssignmentPosition
+  dutyStartTime   DateTime @map("duty_start_time") @db.Timestamptz
+  dutyEndTime     DateTime @map("duty_end_time") @db.Timestamptz
+  checkInTime     DateTime? @map("check_in_time") @db.Timestamptz
+  checkOutTime    DateTime? @map("check_out_time") @db.Timestamptz
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  crewMember      CrewMember @relation(fields: [crewMemberId], references: [id], onDelete: Cascade)
+  flight          Flight @relation(fields: [flightId], references: [id], onDelete: Cascade)
+
+  @@index([crewMemberId])
+  @@index([flightId])
+  @@index([dutyStartTime])
+  @@map("crew_assignments")
+}
+
+enum AssignmentPosition {
+  OPERATING
+  DEADHEAD
+  RESERVE
+  STANDBY
+
+  @@map("assignment_position")
+}
+
+// ============================================================================
+// PAY PERIODS
+// ============================================================================
+
+model PayPeriod {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  startDate       DateTime @map("start_date") @db.Date
+  endDate         DateTime @map("end_date") @db.Date
+  payDate         DateTime @map("pay_date") @db.Date
+  status          PayPeriodStatus
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  payCalculations PayCalculation[]
+  discrepancies   Discrepancy[]
+  claims          Claim[]
+
+  @@index([startDate, endDate])
+  @@index([status])
+  @@map("pay_periods")
+}
+
+enum PayPeriodStatus {
+  OPEN
+  CLOSED
+  PAID
+  PROCESSING
+
+  @@map("pay_period_status")
+}
+
+// ============================================================================
+// PAY CALCULATIONS
+// ============================================================================
+
+model PayCalculation {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  crewMemberId        String   @map("crew_member_id") @db.Uuid
+  payPeriodId         String   @map("pay_period_id") @db.Uuid
+  flightPayHours      Decimal  @map("flight_pay_hours") @db.Decimal(8, 2)
+  flightPayAmount     Decimal  @map("flight_pay_amount") @db.Decimal(10, 2)
+  overtimeHours       Decimal  @default(0) @map("overtime_hours") @db.Decimal(8, 2)
+  overtimeAmount      Decimal  @default(0) @map("overtime_amount") @db.Decimal(10, 2)
+  delayPayAmount      Decimal  @default(0) @map("delay_pay_amount") @db.Decimal(10, 2)
+  perDiemAmount       Decimal  @default(0) @map("per_diem_amount") @db.Decimal(10, 2)
+  premiumPayAmount    Decimal  @default(0) @map("premium_pay_amount") @db.Decimal(10, 2)
+  guaranteeHours      Decimal  @map("guarantee_hours") @db.Decimal(8, 2)
+  totalGrossPay       Decimal  @map("total_gross_pay") @db.Decimal(10, 2)
+  calculationDate     DateTime @map("calculation_date") @db.Timestamptz
+  validatedAt         DateTime? @map("validated_at") @db.Timestamptz
+  validatedBy         String?  @map("validated_by") @db.VarChar(100)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  crewMember          CrewMember @relation(fields: [crewMemberId], references: [id], onDelete: Cascade)
+  payPeriod           PayPeriod @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+
+  @@index([crewMemberId])
+  @@index([payPeriodId])
+  @@index([calculationDate])
+  @@map("pay_calculations")
+}
+
+// ============================================================================
+// DISCREPANCIES (Proactive Detection)
+// ============================================================================
+
+model Discrepancy {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  crewMemberId        String   @map("crew_member_id") @db.Uuid
+  payPeriodId         String   @map("pay_period_id") @db.Uuid
+  flightId            String?  @map("flight_id") @db.Uuid
+  discrepancyType     DiscrepancyType @map("discrepancy_type")
+  expectedAmount      Decimal  @map("expected_amount") @db.Decimal(10, 2)
+  actualAmount        Decimal  @map("actual_amount") @db.Decimal(10, 2)
+  differenceAmount    Decimal  @map("difference_amount") @db.Decimal(10, 2)
+  severity            Severity
+  detectedBy          DetectedBy @map("detected_by")
+  detectedAt          DateTime @map("detected_at") @db.Timestamptz
+  resolutionStatus    ResolutionStatus @map("resolution_status")
+  resolutionDate      DateTime? @map("resolution_date") @db.Timestamptz
+  resolvedBy          String?  @map("resolved_by") @db.VarChar(100)
+  resolutionNotes     String?  @map("resolution_notes") @db.Text
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  crewMember          CrewMember @relation(fields: [crewMemberId], references: [id], onDelete: Cascade)
+  payPeriod           PayPeriod @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+  flight              Flight? @relation(fields: [flightId], references: [id], onDelete: SetNull)
+
+  @@index([crewMemberId])
+  @@index([payPeriodId])
+  @@index([resolutionStatus])
+  @@index([detectedAt])
+  @@index([severity])
+  @@map("discrepancies")
+}
+
+enum DiscrepancyType {
+  UNDERPAYMENT
+  OVERPAYMENT
+  MISSING_FLIGHT
+  INCORRECT_RATE
+  MISSING_PREMIUM
+  INCORRECT_PER_DIEM
+  GUARANTEE_NOT_MET
+  OVERTIME_MISCALCULATION
+  DELAY_PAY_MISSING
+
+  @@map("discrepancy_type")
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+
+  @@map("severity")
+}
+
+enum DetectedBy {
+  PROACTIVE_AGENT
+  CREW_CLAIM
+  SYSTEM_CHECK
+  MANUAL_AUDIT
+
+  @@map("detected_by")
+}
+
+enum ResolutionStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  CLOSED
+  ESCALATED
+
+  @@map("resolution_status")
+}
+
+// ============================================================================
+// CLAIMS (Crew-Submitted)
+// ============================================================================
+
+model Claim {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claimNumber         String   @unique @map("claim_number") @db.VarChar(20)
+  crewMemberId        String   @map("crew_member_id") @db.Uuid
+  payPeriodId         String   @map("pay_period_id") @db.Uuid
+  flightIds           String[] @map("flight_ids")
+  claimType           ClaimType @map("claim_type")
+  description         String   @db.Text
+  claimedAmount       Decimal  @map("claimed_amount") @db.Decimal(10, 2)
+  submittedAt         DateTime @map("submitted_at") @db.Timestamptz
+  submittedBy         String   @map("submitted_by") @db.VarChar(100)
+  status              ClaimStatus
+  reviewedAt          DateTime? @map("reviewed_at") @db.Timestamptz
+  reviewedBy          String?  @map("reviewed_by") @db.VarChar(100)
+  decision            ClaimDecision? @map("decision")
+  decisionRationale   String?  @map("decision_rationale") @db.Text
+  approvedAmount      Decimal? @map("approved_amount") @db.Decimal(10, 2)
+  paymentDate         DateTime? @map("payment_date") @db.Date
+  paymentStatus       PaymentStatus? @map("payment_status")
+  appealSubmittedAt   DateTime? @map("appeal_submitted_at") @db.Timestamptz
+  appealNotes         String?  @map("appeal_notes") @db.Text
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  crewMember          CrewMember @relation(fields: [crewMemberId], references: [id], onDelete: Cascade)
+  payPeriod           PayPeriod @relation(fields: [payPeriodId], references: [id], onDelete: Cascade)
+
+  @@index([crewMemberId])
+  @@index([claimNumber])
+  @@index([status])
+  @@index([submittedAt])
+  @@map("claims")
+}
+
+enum ClaimType {
+  UNDERPAYMENT
+  MISSING_FLIGHT
+  INCORRECT_PER_DIEM
+  MISSING_PREMIUM
+  DELAY_PAY
+  OVERTIME
+  GUARANTEE
+  OTHER
+
+  @@map("claim_type")
+}
+
+enum ClaimStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  DENIED
+  APPEALED
+  CLOSED
+
+  @@map("claim_status")
+}
+
+enum ClaimDecision {
+  APPROVE
+  DENY
+  PARTIAL_APPROVE
+
+  @@map("claim_decision")
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+
+  @@map("payment_status")
+}
+
+// ============================================================================
+// REGULATORY & CONTRACT RULES
+// ============================================================================
+
+model FaaRule {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruleCode        String   @unique @map("rule_code") @db.VarChar(50)
+  ruleCategory    RuleCategory @map("rule_category")
+  ruleTitle       String   @map("rule_title") @db.VarChar(255)
+  ruleText        String   @map("rule_text") @db.Text
+  effectiveDate   DateTime @map("effective_date") @db.Date
+  expirationDate  DateTime? @map("expiration_date") @db.Date
+  appliesTo       AppliesTo[] @map("applies_to")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  ruleInterpretations RuleInterpretation[] @relation("FaaRuleToInterpretation")
+
+  @@index([ruleCode])
+  @@index([ruleCategory])
+  @@map("faa_rules")
+}
+
+enum RuleCategory {
+  FLIGHT_DUTY_PERIOD
+  REST_REQUIREMENTS
+  CUMULATIVE_LIMITS
+  FATIGUE_MANAGEMENT
+  CREW_COMPLEMENT
+  OTHER
+
+  @@map("rule_category")
+}
+
+enum AppliesTo {
+  PILOTS
+  FLIGHT_ATTENDANTS
+  ALL_CREW
+
+  @@map("applies_to")
+}
+
+model UnionContractTerm {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  termCode            String   @unique @map("term_code") @db.VarChar(50)
+  termCategory        TermCategory @map("term_category")
+  termTitle           String   @map("term_title") @db.VarChar(255)
+  termText            String   @map("term_text") @db.Text
+  calculationFormula  Json?    @map("calculation_formula")
+  effectiveDate       DateTime @map("effective_date") @db.Date
+  expirationDate      DateTime? @map("expiration_date") @db.Date
+  appliesTo           CrewPosition[] @map("applies_to")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  ruleInterpretations RuleInterpretation[] @relation("ContractTermToInterpretation")
+
+  @@index([termCode])
+  @@index([termCategory])
+  @@map("union_contract_terms")
+}
+
+enum TermCategory {
+  PAY_RATES
+  GUARANTEES
+  PREMIUMS
+  RIGS
+  PER_DIEM
+  OVERTIME
+  SCHEDULING
+  OTHER
+
+  @@map("term_category")
+}
+
+// ============================================================================
+// RULE INTERPRETATIONS
+// ============================================================================
+
+model RuleInterpretation {
+  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scenarioDescription       String   @map("scenario_description") @db.Text
+  applicableFaaRuleIds      String[] @map("applicable_faa_rule_ids")
+  applicableContractTermIds String[] @map("applicable_contract_term_ids")
+  interpretation            String   @map("interpretation") @db.Text
+  exampleCalculation        Json?    @map("example_calculation")
+  confidenceScore           Int      @map("confidence_score")
+  validatedBy               String?  @map("validated_by") @db.VarChar(100)
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relationships
+  faaRules                  FaaRule[] @relation("FaaRuleToInterpretation")
+  contractTerms             UnionContractTerm[] @relation("ContractTermToInterpretation")
+
+  @@index([confidenceScore])
+  @@map("rule_interpretations")
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  crewMemberId        String   @map("crew_member_id") @db.Uuid
+  notificationType    NotificationType @map("notification_type")
+  title               String   @db.VarChar(255)
+  message             String   @db.Text
+  relatedEntityType   String?  @map("related_entity_type") @db.VarChar(50)
+  relatedEntityId     String?  @map("related_entity_id") @db.Uuid
+  sentAt              DateTime @map("sent_at") @db.Timestamptz
+  readAt              DateTime? @map("read_at") @db.Timestamptz
+  deliveryMethod      DeliveryMethod @map("delivery_method")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relationships
+  crewMember          CrewMember @relation(fields: [crewMemberId], references: [id], onDelete: Cascade)
+
+  @@index([crewMemberId])
+  @@index([sentAt])
+  @@index([readAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  PROACTIVE_FIX
+  CLAIM_STATUS
+  COMPLIANCE_WARNING
+  PAY_CALCULATION_READY
+  DISCREPANCY_DETECTED
+  PAYMENT_PROCESSED
+
+  @@map("notification_type")
+}
+
+enum DeliveryMethod {
+  EMAIL
+  SMS
+  APP_PUSH
+  IN_APP
+
+  @@map("delivery_method")
+}
+
+// ============================================================================
+// AUDIT LOG
+// ============================================================================
+
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityType  String   @map("entity_type") @db.VarChar(50)
+  entityId    String   @map("entity_id") @db.Uuid
+  action      AuditAction
+  actorId     String   @map("actor_id") @db.VarChar(100)
+  actorType   ActorType @map("actor_type")
+  changes     Json?
+  reason      String?  @db.Text
+  ipAddress   String?  @map("ip_address") @db.VarChar(45)
+  userAgent   String?  @map("user_agent") @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_log")
+}
+
+enum AuditAction {
+  CREATED
+  UPDATED
+  DELETED
+  APPROVED
+  DENIED
+  VIEWED
+
+  @@map("audit_action")
+}
+
+enum ActorType {
+  CREW
+  ADMIN
+  AI_AGENT
+  SYSTEM
+
+  @@map("actor_type")
+}
